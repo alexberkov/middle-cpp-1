@@ -17,7 +17,7 @@ public:
         CHECKSUM,
     };
 
-    bool Parse(int argc, char *argv[]);
+    void Parse(int argc, char *argv[]);
 
     COMMAND_TYPE GetCommand() const { return command_; }
     std::string GetInputFile() const { return inputFile_; }
@@ -32,6 +32,7 @@ private:
         {"checksum", ProgramOptions::COMMAND_TYPE::CHECKSUM},
     };
 
+    std::string command_str_;
     std::string inputFile_;
     std::string outputFile_;
     std::string password_;
