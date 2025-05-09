@@ -1,14 +1,16 @@
 #include <memory>
+#include <vector>
 #include <array>
 #include <format>
 #include <iomanip>
+#include <sstream>
 #include <openssl/evp.h>
 #include <openssl/err.h>
 #include "crypto_guard_ctx.h"
 
 static constexpr size_t MAX_ERR_SIZE = 256;
 static constexpr size_t BLOCK_LEN = 1024;
-static constexpr literal MD_ALGO = "sha256";
+static constexpr std::string MD_ALGO = "sha256";
 
 struct AesCipherParams {
     static const size_t KEY_SIZE = 32;             // AES-256 key size
@@ -96,7 +98,7 @@ void CryptoGuardCtx::Impl::InitCipherCTX(std::string_view password, int encrypt)
 }
 
 void CryptoGuardCtx::Impl::InitMDCTX() {
-    const EVP_MD *md = EVP_get_digestbyname(MD_ALGO);
+    const EVP_MD *md = EVP_get_digestbyname(MD_ALGO.c_str());
     md_ctx = std::unique_ptr<EVP_MD_CTX, MDCTXDeleter> { EVP_MD_CTX_new() };
     if (!md || !md_ctx || !EVP_DigestInit_ex2(md_ctx.get(), md, NULL))
         GetEVPError();
@@ -104,13 +106,14 @@ void CryptoGuardCtx::Impl::InitMDCTX() {
 
 void CryptoGuardCtx::Impl::ProcessFile(std::iostream &inStream, std::iostream &outStream) {
     int outLen;
-    std::vector<unsigned char> inBuf(BLOCK_LEN), outBuf(BLOCK_LEN + EVP_MAX_BLOCK_LENGTH);
+    std::vector<char> inBuf(BLOCK_LEN);
+    std::vector<unsigned char> outBuf(BLOCK_LEN + EVP_MAX_BLOCK_LENGTH);
 
     inStream.read(inBuf.data(), BLOCK_LEN);
-    for (auto readLen = inStream.gcount(); readLen > 0; ) {
-        if (!EVP_CipherUpdate(cipher_ctx.get(), outBuf.data(), &outLen, inBuf.data(), readLen))
+    for (auto readLen = inStream.gcount(); readLen > 0; readLen = inStream.gcount()) {
+        if (!EVP_CipherUpdate(cipher_ctx.get(), outBuf.data(), &outLen, (unsigned char*)inBuf.data(), readLen))
             GetEVPError();
-        outStream.write(outBuf.data(), outLen);
+        outStream.write((char *)outBuf.data(), outLen);
 
         inStream.read(inBuf.data(), BLOCK_LEN);
     }
@@ -118,16 +121,17 @@ void CryptoGuardCtx::Impl::ProcessFile(std::iostream &inStream, std::iostream &o
     if (!EVP_CipherFinal_ex(cipher_ctx.get(), outBuf.data(), &outLen))
         GetEVPError();
 
-    outStream.write(outBuf.data(), outLen);
+    outStream.write((char *)outBuf.data(), outLen);
 }
 
 std::string CryptoGuardCtx::Impl::CalculateChecksum(std::iostream &inStream) {
     unsigned int md_len;
-    std::vector<unsigned char> inBuf(BLOCK_LEN), md_value[EVP_MAX_MD_SIZE];
+    std::vector<char> inBuf(BLOCK_LEN);
+    std::vector<unsigned char> md_value(EVP_MAX_MD_SIZE);
 
     inStream.read(inBuf.data(), BLOCK_LEN);
-    for (auto readLen = inStream.gcount(); readLen > 0; ) {
-        if (!EVP_DigestUpdate(md_ctx.get(), inBuf.data(), readLen))
+    for (auto readLen = inStream.gcount(); readLen > 0; readLen = inStream.gcount()) {
+        if (!EVP_DigestUpdate(md_ctx.get(), (unsigned char*)inBuf.data(), readLen))
             GetEVPError();
 
         inStream.read(inBuf.data(), BLOCK_LEN);
@@ -138,7 +142,7 @@ std::string CryptoGuardCtx::Impl::CalculateChecksum(std::iostream &inStream) {
 
     std::stringstream res;
     for (const auto& sym: md_value)
-        res << std::hex << sym;
+        res << std::hex << uint16_t(sym);
     return res.str();
 }
 
