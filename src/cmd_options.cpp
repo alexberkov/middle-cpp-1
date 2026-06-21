@@ -7,10 +7,14 @@ namespace po = boost::program_options;
 
 ProgramOptions::ProgramOptions() : desc_("Allowed options") {
     desc_.add_options()("help,h", "show allowed options")
-            ("command,c", po::value(&command_str_)->value_name("encrypt/decrypt/checksum"), "action to perform")
-            ("input,i", po::value(&inputFile_)->value_name("filename"), "set input file path")
-            ("output,o", po::value(&outputFile_)->value_name("filename"), "set output file path")
-            ("password,p", po::value(&password_)->value_name("string"), "set password for encryption/decryption");
+            ("command,c", po::value(&command_str_)->value_name("encrypt/decrypt/checksum")->required(),
+                "action to perform")
+            ("input,i", po::value(&inputFile_)->value_name("filename")->required(),
+                "set input file path")
+            ("output,o", po::value(&outputFile_)->value_name("filename"),
+                "set output file path")
+            ("password,p", po::value(&password_)->value_name("string"),
+                "set password for encryption/decryption");
 }
 
 ProgramOptions::~ProgramOptions() = default;
@@ -25,16 +29,10 @@ void ProgramOptions::Parse(int argc, char *argv[]) {
         return;
     }
 
-    if (!vm.contains("command"))
-        throw std::runtime_error("Command is not specified.");
-    try {
-        command_ = commandMapping_.at(command_str_);
-    } catch (const std::exception &e) {
-        throw std::runtime_error("Incorrect command.");
-    }
-
-    if (!vm.contains("input"))
-        throw std::runtime_error("Input file is not specified.");
+    if (const auto it = commandMapping_.find(command_str_); it != commandMapping_.end())
+        command_ = it->second;
+    else
+        throw std::runtime_error(std::format("Unknown command: {}", command_str_));
 
     if (command_ != COMMAND_TYPE::CHECKSUM) {
         if (!vm.contains("output"))

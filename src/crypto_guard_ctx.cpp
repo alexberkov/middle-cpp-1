@@ -43,7 +43,7 @@ public:
     void ProcessFile(std::iostream &inStream, std::iostream &outStream);
     std::string CalculateChecksum(std::iostream &inStream);
 
-    void GetEVPError();
+    void ThrowEVPError();
 private:
     std::unique_ptr<EVP_CIPHER_CTX, CipherCTXDeleter> cipher_ctx;
     std::unique_ptr<EVP_MD_CTX, MDCTXDeleter> md_ctx;
@@ -58,17 +58,15 @@ CryptoGuardCtx::Impl::Impl() {
 }
 
 CryptoGuardCtx::Impl::~Impl() {
-    if (cipher_ctx)
-        cipher_ctx.reset();
-    if (md_ctx)
-        md_ctx.reset();
+    cipher_ctx.reset();
+    md_ctx.reset();
     EVP_cleanup();
 }
 
-void CryptoGuardCtx::Impl::GetEVPError() {
-    char err_buf[MAX_ERR_SIZE];
-    ERR_error_string_n(ERR_get_error(), err_buf, MAX_ERR_SIZE - 1);
-    throw std::runtime_error(std::format("EVP error occurred: {}", err_buf));
+void CryptoGuardCtx::Impl::ThrowEVPError() {
+    std::array<char, MAX_ERR_SIZE> err_buf{};
+    ERR_error_string_n(ERR_get_error(), err_buf.data(), MAX_ERR_SIZE - 1);
+    throw std::runtime_error(std::format("EVP error occurred: {}", err_buf.data()));
 }
 
 AesCipherParams CryptoGuardCtx::Impl::CreateCipherParamsFromPassword(std::string_view password) {
@@ -94,14 +92,14 @@ void CryptoGuardCtx::Impl::InitCipherCTX(std::string_view password, int encrypt)
     if (!EVP_CipherInit_ex(
             cipher_ctx.get(), params.cipher, nullptr, params.key.data(), params.iv.data(), params.encrypt
         ))
-            GetEVPError();
+            ThrowEVPError();
 }
 
 void CryptoGuardCtx::Impl::InitMDCTX() {
     const EVP_MD *md = EVP_get_digestbyname(MD_ALGO.c_str());
     md_ctx = std::unique_ptr<EVP_MD_CTX, MDCTXDeleter> { EVP_MD_CTX_new() };
     if (!md || !md_ctx || !EVP_DigestInit_ex2(md_ctx.get(), md, NULL))
-        GetEVPError();
+        ThrowEVPError();
 }
 
 void CryptoGuardCtx::Impl::ProcessFile(std::iostream &inStream, std::iostream &outStream) {
@@ -112,14 +110,17 @@ void CryptoGuardCtx::Impl::ProcessFile(std::iostream &inStream, std::iostream &o
     inStream.read(inBuf.data(), BLOCK_LEN);
     for (auto readLen = inStream.gcount(); readLen > 0; readLen = inStream.gcount()) {
         if (!EVP_CipherUpdate(cipher_ctx.get(), outBuf.data(), &outLen, (unsigned char*)inBuf.data(), readLen))
-            GetEVPError();
+            ThrowEVPError();
         outStream.write((char *)outBuf.data(), outLen);
 
         inStream.read(inBuf.data(), BLOCK_LEN);
+
+        if (!inStream.good() || !outStream.good())
+            throw std::runtime_error("Error processing input/output filestream.");
     }
 
     if (!EVP_CipherFinal_ex(cipher_ctx.get(), outBuf.data(), &outLen))
-        GetEVPError();
+        ThrowEVPError();
 
     outStream.write((char *)outBuf.data(), outLen);
 }
@@ -132,13 +133,16 @@ std::string CryptoGuardCtx::Impl::CalculateChecksum(std::iostream &inStream) {
     inStream.read(inBuf.data(), BLOCK_LEN);
     for (auto readLen = inStream.gcount(); readLen > 0; readLen = inStream.gcount()) {
         if (!EVP_DigestUpdate(md_ctx.get(), (unsigned char*)inBuf.data(), readLen))
-            GetEVPError();
+            ThrowEVPError();
 
         inStream.read(inBuf.data(), BLOCK_LEN);
+
+        if (!inStream.good())
+            throw std::runtime_error("Error processing input/output filestream.");
     }
 
     if (!EVP_DigestFinal_ex(md_ctx.get(), md_value.data(), &md_len))
-        GetEVPError();
+        ThrowEVPError();
 
     std::stringstream res;
     for (const auto& sym: md_value)

@@ -10,7 +10,7 @@ std::fstream get_filestream(const std::string& filename, std::ios::openmode mode
     std::fstream fs;
     fs.open(filename, mode);
     if (!fs.is_open())
-        throw std::invalid_argument("Incorrect filepath.");
+        throw std::invalid_argument(std::format("Incorrect filepath.", filename));
     return fs;
 }
 
